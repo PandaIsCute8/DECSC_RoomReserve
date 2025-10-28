@@ -73,11 +73,12 @@ export function RoomCard({ room }: RoomCardProps) {
             <span>Available at {room.nextAvailableTime}</span>
           </div>
         )}
-
         {/* Action Button */}
+
+        <br></br>
         <Link href={`/room/${room.id}`}>
           <Button
-            className="w-full"
+            className="w-full content-baseline"
             variant={isAvailable ? "default" : "outline"}
             disabled={!isAvailable}
             data-testid={`button-reserve-${room.id}`}
