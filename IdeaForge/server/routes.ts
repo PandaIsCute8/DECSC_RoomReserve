@@ -1,0 +1,253 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { insertUserSchema, insertReservationSchema } from "@shared/schema";
+import { z } from "zod";
+
+// Simple session storage - in production, use proper session management
+const sessions = new Map<string, { userId: string; email: string }>();
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Middleware to get current user
+  const getCurrentUser = (req: any) => {
+    const sessionId = req.headers["x-session-id"] as string;
+    return sessionId ? sessions.get(sessionId) : null;
+  };
+
+  // Auth endpoints
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email, name } = insertUserSchema.parse(req.body);
+
+      // Validate Ateneo email
+      if (!email.endsWith("@ateneo.edu")) {
+        return res.status(400).json({ 
+          message: "Only @ateneo.edu email addresses are allowed" 
+        });
+      }
+
+      // Get or create user
+      let user = await storage.getUserByEmail(email);
+      if (!user) {
+        user = await storage.createUser({ email, name, isAdmin: false });
+      }
+
+      // Create session
+      const sessionId = Math.random().toString(36).substring(7);
+      sessions.set(sessionId, { userId: user.id, email: user.email });
+
+      res.json({ user, sessionId });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(400).json({ message: "Invalid request" });
+    }
+  });
+
+  app.post("/api/auth/logout", async (req, res) => {
+    const sessionId = req.headers["x-session-id"] as string;
+    if (sessionId) {
+      sessions.delete(sessionId);
+    }
+    res.json({ message: "Logged out" });
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    const session = getCurrentUser(req);
+    if (!session) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    const user = await storage.getUserByEmail(session.email);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(user);
+  });
+
+  // Room endpoints
+  app.get("/api/rooms", async (req, res) => {
+    try {
+      const now = new Date();
+      const currentDate = now.toISOString().split('T')[0];
+      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+      const rooms = await storage.getRoomsWithStatus(currentDate, currentTime);
+      res.json(rooms);
+    } catch (error) {
+      console.error("Get rooms error:", error);
+      res.status(500).json({ message: "Failed to fetch rooms" });
+    }
+  });
+
+  app.get("/api/rooms/:id", async (req, res) => {
+    try {
+      const room = await storage.getRoom(req.params.id);
+      if (!room) {
+        return res.status(404).json({ message: "Room not found" });
+      }
+      res.json(room);
+    } catch (error) {
+      console.error("Get room error:", error);
+      res.status(500).json({ message: "Failed to fetch room" });
+    }
+  });
+
+  // Reservation endpoints
+  app.post("/api/reservations", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const data = insertReservationSchema.parse(req.body);
+
+      // Validate 30-minute advance booking
+      const now = new Date();
+      const reservationDateTime = new Date(`${data.date}T${data.startTime}:00`);
+      const minBookingTime = new Date(now.getTime() + 30 * 60 * 1000);
+
+      if (reservationDateTime < minBookingTime) {
+        return res.status(400).json({ 
+          message: "Reservations must be made at least 30 minutes in advance" 
+        });
+      }
+
+      // Check for conflicts
+      const hasConflict = await storage.checkForConflicts(
+        data.roomId,
+        data.date,
+        data.startTime,
+        data.endTime
+      );
+
+      if (hasConflict) {
+        return res.status(409).json({ 
+          message: "This time slot is already booked" 
+        });
+      }
+
+      // Create reservation
+      const reservation = await storage.createReservation({
+        ...data,
+        userId: session.userId,
+      });
+
+      res.status(201).json(reservation);
+    } catch (error) {
+      console.error("Create reservation error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid request data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create reservation" });
+    }
+  });
+
+  app.get("/api/reservations/my", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const reservations = await storage.getUserReservations(session.userId);
+      res.json(reservations);
+    } catch (error) {
+      console.error("Get user reservations error:", error);
+      res.status(500).json({ message: "Failed to fetch reservations" });
+    }
+  });
+
+  app.post("/api/reservations/:id/checkin", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) {
+        return res.status(404).json({ message: "Reservation not found" });
+      }
+
+      if (reservation.userId !== session.userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      if (reservation.status !== "confirmed") {
+        return res.status(400).json({ message: "Reservation cannot be checked in" });
+      }
+
+      // Check if within check-in window
+      const now = new Date();
+      if (reservation.checkInDeadline && now > reservation.checkInDeadline) {
+        // Mark as no-show
+        await storage.updateReservationStatus(req.params.id, "no_show");
+        return res.status(400).json({ 
+          message: "Check-in deadline has passed. Reservation marked as no-show." 
+        });
+      }
+
+      const updated = await storage.updateReservationStatus(
+        req.params.id, 
+        "checked_in",
+        now
+      );
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Check-in error:", error);
+      res.status(500).json({ message: "Failed to check in" });
+    }
+  });
+
+  app.delete("/api/reservations/:id", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) {
+        return res.status(404).json({ message: "Reservation not found" });
+      }
+
+      if (reservation.userId !== session.userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      await storage.updateReservationStatus(req.params.id, "cancelled");
+      res.json({ message: "Reservation cancelled successfully" });
+    } catch (error) {
+      console.error("Cancel reservation error:", error);
+      res.status(500).json({ message: "Failed to cancel reservation" });
+    }
+  });
+
+  // Admin endpoints
+  app.get("/api/admin/reservations", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const user = await storage.getUserByEmail(session.email);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const reservations = await storage.getAllReservationsWithDetails();
+      res.json(reservations);
+    } catch (error) {
+      console.error("Get all reservations error:", error);
+      res.status(500).json({ message: "Failed to fetch reservations" });
+    }
+  });
+
+  const httpServer = createServer(app);
+
+  return httpServer;
+}

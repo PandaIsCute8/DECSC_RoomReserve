@@ -1,0 +1,37 @@
+Can you make a website with the following context and value proposition:
+
+Context:
+Users have a hard time having to find available classrooms whether it is to study or to rest or maybe meet up with groupmates to finish a project. During free periods or breaks, students usually walk around campus trying to find empty spaces which can lead to wasted time and cause frustration. Without a proper system to check for any rooms availability at any given time, students are unable to plan ahead and plan for study sessions or rest breaks well in advance.
+
+Value Proposition:
+RoomReserve gives students a fast and easy way to see which classrooms are available in real time so that students can book them whenever they need it. It removed the randomness factor in walking around campus and hoping to find a place even though there is no guarantee that you can actually find one. The app can help students be more productive with their time, do more things, accomplish more tasks and make full use of the campus’ spaces.
+
+The website should include the following features and be used to successful achieve these target points:
+
+Main Features:
+
+Classroom Reservation System:
+Allows users to reserve rooms in the JGSOM building depending on availability.
+As a student with a block or group, I want to be able to reserve empty classrooms so that I have a guaranteed place to study or collaborate with the benefit of aircon as well.
+
+Room Availability Tracker:
+Tracks the available rooms in JGSOM and frequently updates based on reservations and availability.
+As a member of the Ateneo community, I want to see which rooms are available in real-time so I don’t waste time visiting them in person.
+
+Room Scheduling:
+Will only allow users to schedule for rooms in advance (at least 30 minutes before).
+As a student, I want to be able to plan ahead of my schedule and ensure I have a place to work/tambay.
+
+Booking Confirmation and Timer:
+It confirms if users are utilizing the room. Gives users a 15-minute time limit to confirm they are in the room. Rescinds schedule if users aren’t present on time.
+As a user, I want confirmation on my bookings so that I can rely on my reserved space.
+As an admin, I want to ensure users are utilizing the space so that reservation slots won’t be wasted.
+
+User Authentification
+Connected to users’ GMAIL Accounts to ensure rooms are being used by Ateneo students. Will be used for student log-in and security as well.
+As an admin, I want to ensure only Ateneo members can use the service so that I will know the users are legitimate.
+
+Can you utilize the following framework as well:
+
+
+React.js, Tailwind CSS, Node.js, Express.js , Google Authentication API (OAuth) or Firebase Authentication API, Facilities API (1.0), GMail API, PostgreSQL, Figma, Procreate
