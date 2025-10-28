@@ -1,6 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import {
+  sendReservationConfirmationEmail,
+  scheduleFiveMinuteReminder,
+  cancelReminder,
+} from "./mailer";
 import { insertUserSchema, insertReservationSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -155,6 +160,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: session.userId,
       });
 
+      // Load details for email composition
+      const withDetails = await storage.getReservationWithDetails(reservation.id);
+      if (withDetails && withDetails.user && withDetails.room) {
+        await sendReservationConfirmationEmail({
+          id: withDetails.id,
+          date: withDetails.date,
+          startTime: withDetails.startTime,
+          endTime: withDetails.endTime,
+          purpose: withDetails.purpose,
+          user: {
+            id: withDetails.user.id,
+            email: withDetails.user.email,
+            name: withDetails.user.name,
+          },
+          room: {
+            id: withDetails.room.id,
+            name: withDetails.room.name,
+            building: withDetails.room.building,
+            floor: withDetails.room.floor,
+          },
+        });
+
+        scheduleFiveMinuteReminder({
+          id: withDetails.id,
+          date: withDetails.date,
+          startTime: withDetails.startTime,
+          endTime: withDetails.endTime,
+          purpose: withDetails.purpose,
+          user: {
+            id: withDetails.user.id,
+            email: withDetails.user.email,
+            name: withDetails.user.name,
+          },
+          room: {
+            id: withDetails.room.id,
+            name: withDetails.room.name,
+            building: withDetails.room.building,
+            floor: withDetails.room.floor,
+          },
+        });
+      }
+
       res.status(201).json(reservation);
     } catch (error) {
       console.error("Create reservation error:", error);
@@ -216,6 +263,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         now
       );
 
+      // No further reminder needed after check-in
+      cancelReminder(req.params.id);
+
       res.json(updated);
     } catch (error) {
       console.error("Check-in error:", error);
@@ -240,6 +290,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       await storage.updateReservationStatus(req.params.id, "cancelled");
+      cancelReminder(req.params.id);
       res.json({ message: "Reservation cancelled successfully" });
     } catch (error) {
       console.error("Cancel reservation error:", error);
@@ -265,6 +316,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get all reservations error:", error);
       res.status(500).json({ message: "Failed to fetch reservations" });
+    }
+  });
+
+  // Optional: resend emails for a reservation (admin only)
+  app.post("/api/admin/reservations/:id/resend", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) return res.status(401).json({ message: "Not authenticated" });
+
+      const user = await storage.getUserByEmail(session.email);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const details = await storage.getReservationWithDetails(req.params.id);
+      if (!details || !details.user || !details.room) {
+        return res.status(404).json({ message: "Reservation not found" });
+      }
+
+      await sendReservationConfirmationEmail({
+        id: details.id,
+        date: details.date,
+        startTime: details.startTime,
+        endTime: details.endTime,
+        purpose: details.purpose,
+        user: { id: details.user.id, email: details.user.email, name: details.user.name },
+        room: { id: details.room.id, name: details.room.name, building: details.room.building, floor: details.room.floor },
+      });
+
+      scheduleFiveMinuteReminder({
+        id: details.id,
+        date: details.date,
+        startTime: details.startTime,
+        endTime: details.endTime,
+        purpose: details.purpose,
+        user: { id: details.user.id, email: details.user.email, name: details.user.name },
+        room: { id: details.room.id, name: details.room.name, building: details.room.building, floor: details.room.floor },
+      });
+
+      res.json({ message: "Emails re-sent and reminder scheduled" });
+    } catch (error) {
+      console.error("Admin resend email error:", error);
+      res.status(500).json({ message: "Failed to resend emails" });
     }
   });
 
