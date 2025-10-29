@@ -6,7 +6,7 @@ import {
   scheduleFiveMinuteReminder,
   cancelReminder,
 } from "./mailer";
-import { insertUserSchema, insertReservationSchema } from "@shared/schema";
+import { insertUserSchema, insertReservationSchema, insertRoomReviewSchema } from "@shared/schema";
 import { z } from "zod";
 
 // Simple session storage - in production, use proper session management
@@ -95,6 +95,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get room error:", error);
       res.status(500).json({ message: "Failed to fetch room" });
+    }
+  });
+
+  // Reviews endpoints
+  app.get("/api/rooms/:id/reviews", async (req, res) => {
+    try {
+      const reviews = await storage.getRoomReviews(req.params.id);
+      res.json(reviews);
+    } catch (error) {
+      console.error("Get room reviews error:", error);
+      res.status(500).json({ message: "Failed to fetch reviews" });
+    }
+  });
+
+  app.post("/api/rooms/:id/reviews", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) return res.status(401).json({ message: "Not authenticated" });
+
+      const parsed = insertRoomReviewSchema.parse({
+        ...req.body,
+        roomId: req.params.id,
+        userId: session.userId,
+      });
+
+      const created = await storage.createRoomReview(parsed);
+      res.status(201).json(created);
+    } catch (error) {
+      console.error("Create review error:", error);
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid review", errors: error.errors });
+      res.status(500).json({ message: "Failed to create review" });
+    }
+  });
+
+  // Hotspots
+  app.get("/api/hotspots", async (req, res) => {
+    try {
+      const now = new Date();
+      const currentDate = (req.query.date as string) || now.toISOString().split('T')[0];
+      const currentTime = (req.query.time as string) || `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      const data = await storage.getHotspots(currentDate, currentTime);
+      res.json(data);
+    } catch (error) {
+      console.error("Get hotspots error:", error);
+      res.status(500).json({ message: "Failed to fetch hotspots" });
+    }
+  });
+
+  // Recommendations
+  app.get("/api/recommendations", async (req, res) => {
+    try {
+      const now = new Date();
+      const currentDate = (req.query.date as string) || now.toISOString().split('T')[0];
+      const currentTime = (req.query.time as string) || `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      const purpose = (req.query.purpose as string) || undefined;
+      const groupSize = req.query.groupSize ? parseInt(req.query.groupSize as string, 10) : undefined;
+      const rooms = await storage.getRecommendations(purpose, groupSize, currentDate, currentTime);
+      res.json(rooms);
+    } catch (error) {
+      console.error("Get recommendations error:", error);
+      res.status(500).json({ message: "Failed to fetch recommendations" });
     }
   });
 

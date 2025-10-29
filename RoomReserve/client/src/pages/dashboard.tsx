@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, Filter, MapPin } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -18,11 +19,25 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [capacityFilter, setCapacityFilter] = useState<string>("all");
+  const [amenityPrefs, setAmenityPrefs] = useState<Record<string, boolean>>({
+    "WiFi": false,
+    "Projector": false,
+    "Air Conditioning": false,
+    "Whiteboard": false,
+    "Smart TV": false,
+  });
 
   // Fetch rooms
   const { data: rooms, isLoading } = useQuery<RoomWithCurrentStatus[]>({
     queryKey: ["/api/rooms"],
   });
+
+  const { data: hotspots } = useQuery<any[]>({
+    queryKey: ["/api/hotspots"],
+  });
+
+  // selected amenities array for matching/scoring
+  const selectedAmenities = useMemo(() => Object.keys(amenityPrefs).filter(k => amenityPrefs[k]), [amenityPrefs]);
 
   // Filter rooms
   const filteredRooms = rooms?.filter((room) => {
@@ -38,8 +53,23 @@ export default function Dashboard() {
       (capacityFilter === "medium" && room.capacity > 20 && room.capacity <= 40) ||
       (capacityFilter === "large" && room.capacity > 40);
 
-    return matchesSearch && matchesFloor && matchesCapacity;
+    const matchesAmenities = selectedAmenities.length === 0 || selectedAmenities.every(a => (room.amenities || []).includes(a));
+
+    return matchesSearch && matchesFloor && matchesCapacity && matchesAmenities;
   }) || [];
+
+  const sortedRooms = useMemo(() => {
+    return [...filteredRooms].sort((a, b) => {
+      const aAvail = a.currentReservation ? 0 : 1;
+      const bAvail = b.currentReservation ? 0 : 1;
+      if (aAvail !== bAvail) return bAvail - aAvail; // available first
+      if (selectedAmenities.length === 0) return 0;
+      const aScore = selectedAmenities.filter(ae => (a.amenities || []).includes(ae)).length;
+      const bScore = selectedAmenities.filter(ae => (b.amenities || []).includes(ae)).length;
+      if (aScore !== bScore) return bScore - aScore; // more matches first
+      return 0;
+    });
+  }, [filteredRooms, selectedAmenities]);
 
   // Calculate stats
   const totalRooms = rooms?.length || 0;
@@ -147,14 +177,29 @@ export default function Dashboard() {
               <SelectItem value="large">Large (40+)</SelectItem>
             </SelectContent>
           </Select>
+          {/* Amenity Preferences */}
+          <div className="lg:col-span-1">
+            <p className="text-sm font-medium mb-2">Amenity Preferences</p>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.keys(amenityPrefs).map((amenity) => (
+                <label key={amenity} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={amenityPrefs[amenity]}
+                    onCheckedChange={(v) => setAmenityPrefs(prev => ({ ...prev, [amenity]: Boolean(v) }))}
+                  />
+                  <span>{amenity}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Active Filters Summary */}
-        {(searchQuery || floorFilter !== "all" || capacityFilter !== "all") && (
+        {(searchQuery || floorFilter !== "all" || capacityFilter !== "all" || selectedAmenities.length > 0) && (
           <div className="flex items-center gap-2 mt-4 pt-4 border-t">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">
-              Showing {filteredRooms.length} of {totalRooms} rooms
+              Showing {sortedRooms.length} of {totalRooms} rooms
             </span>
             <Button
               variant="ghost"
@@ -163,6 +208,7 @@ export default function Dashboard() {
                 setSearchQuery("");
                 setFloorFilter("all");
                 setCapacityFilter("all");
+                setAmenityPrefs({ "WiFi": false, "Projector": false, "Air Conditioning": false, "Whiteboard": false, "Smart TV": false });
               }}
               data-testid="button-clear-filters"
             >
@@ -170,6 +216,27 @@ export default function Dashboard() {
             </Button>
           </div>
         )}
+      </div>
+
+      {/* Hotspots */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="bg-card border rounded-lg p-4">
+          <h3 className="font-semibold mb-3">Crowd Hotspots</h3>
+          <div className="space-y-2">
+            {hotspots?.slice(0, 6).map((h: any, i: number) => {
+              const pct = h.total ? Math.round((h.occupied / h.total) * 100) : 0;
+              return (
+                <div key={i} className="flex items-center justify-between text-sm">
+                  <span>{h.building} / Floor {h.floor}</span>
+                  <span className={pct > 60 ? "text-destructive" : "text-muted-foreground"}>{pct}% busy</span>
+                </div>
+              );
+            })}
+            {!hotspots?.length && (
+              <p className="text-sm text-muted-foreground">No hotspot data yet.</p>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Rooms Grid */}
@@ -181,9 +248,9 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
-      ) : filteredRooms.length > 0 ? (
+      ) : sortedRooms.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredRooms.map((room) => (
+          {sortedRooms.map((room) => (
             <RoomCard key={room.id} room={room} />
           ))}
         </div>

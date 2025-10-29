@@ -3,6 +3,7 @@ import {
   users, 
   rooms, 
   reservations,
+  roomReviews,
   type User, 
   type InsertUser,
   type Room,
@@ -10,10 +11,12 @@ import {
   type Reservation,
   type InsertReservation,
   type ReservationWithDetails,
-  type RoomWithCurrentStatus
+  type RoomWithCurrentStatus,
+  type RoomReview,
+  type InsertRoomReview
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, avg, count } from "drizzle-orm";
 
 export interface IStorage {
   // User methods
@@ -37,6 +40,15 @@ export interface IStorage {
   updateReservationStatus(id: string, status: string, checkedInAt?: Date): Promise<Reservation | undefined>;
   deleteReservation(id: string): Promise<boolean>;
   checkForConflicts(roomId: string, date: string, startTime: string, endTime: string): Promise<boolean>;
+
+  // Reviews
+  createRoomReview(review: InsertRoomReview): Promise<RoomReview>;
+  getRoomReviews(roomId: string): Promise<(RoomReview & { user: User })[]>;
+  getRoomAverageRating(roomId: string): Promise<number | null>;
+
+  // Hotspots / Recommendations
+  getHotspots(date: string, time: string): Promise<Array<{ building: string; floor: number; occupied: number; total: number }>>;
+  getRecommendations(purpose: string | undefined, groupSize: number | undefined, date: string, time: string): Promise<RoomWithCurrentStatus[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -264,6 +276,77 @@ export class DatabaseStorage implements IStorage {
       );
 
     return conflicts.length > 0;
+  }
+
+  // Reviews
+  async createRoomReview(review: InsertRoomReview): Promise<RoomReview> {
+    const [row] = await db.insert(roomReviews).values(review).returning();
+    return row;
+  }
+
+  async getRoomReviews(roomId: string): Promise<(RoomReview & { user: User })[]> {
+    const rows = await db
+      .select()
+      .from(roomReviews)
+      .leftJoin(users, eq(roomReviews.userId, users.id))
+      .where(eq(roomReviews.roomId, roomId))
+      .orderBy(desc(roomReviews.createdAt));
+
+    return rows
+      .filter(r => r.users)
+      .map(r => ({ ...r.room_reviews!, user: r.users! }));
+  }
+
+  async getRoomAverageRating(roomId: string): Promise<number | null> {
+    const rows = await db
+      .select({ value: avg(roomReviews.rating).as("avg") })
+      .from(roomReviews)
+      .where(eq(roomReviews.roomId, roomId));
+    const val = (rows[0] as any)?.value as number | null;
+    return val ?? null;
+  }
+
+  // Hotspots and Recommendations
+  async getHotspots(date: string, time: string) {
+    const allRooms = await this.getAllRooms();
+    const roomsWith = await this.getRoomsWithStatus(date, time);
+    const map = new Map<string, { building: string; floor: number; occupied: number; total: number }>();
+    for (const room of allRooms) {
+      const key = `${room.building}-${room.floor}`;
+      if (!map.has(key)) map.set(key, { building: room.building, floor: room.floor, occupied: 0, total: 0 });
+      const bucket = map.get(key)!;
+      bucket.total += 1;
+    }
+    for (const r of roomsWith) {
+      const key = `${r.building}-${r.floor}`;
+      const bucket = map.get(key)!;
+      if (r.currentReservation) bucket.occupied += 1;
+    }
+    return Array.from(map.values()).sort((a, b) => b.occupied / b.total - a.occupied / a.total);
+  }
+
+  async getRecommendations(purpose: string | undefined, groupSize: number | undefined, date: string, time: string): Promise<RoomWithCurrentStatus[]> {
+    const roomsWith = await this.getRoomsWithStatus(date, time);
+    // Score rooms: prefer available, capacity close to groupSize, basic amenity preference if purpose suggests
+    const wantQuiet = purpose ? /study|review|quiet/i.test(purpose) : false;
+    const wantCollab = purpose ? /tambay|group|collab|meeting/i.test(purpose) : false;
+
+    return roomsWith
+      .map(r => {
+        let score = 0;
+        if (!r.currentReservation) score += 100; // available now
+        if (typeof groupSize === 'number' && groupSize > 0) {
+          const diff = Math.abs((r.capacity || 0) - groupSize);
+          score += Math.max(0, 50 - diff);
+        }
+        const amenities = (r.amenities || []) as string[];
+        if (wantQuiet && amenities.some(a => /Air Conditioning|Whiteboard|Smart TV/i.test(a))) score += 10;
+        if (wantCollab && amenities.some(a => /WiFi|Projector|Smart TV/i.test(a))) score += 10;
+        return { room: r, score };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
+      .map(x => x.room);
   }
 }
 

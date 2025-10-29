@@ -48,6 +48,17 @@ export const reservations = pgTable("reservations", {
   checkedInAt: timestamp("checked_in_at"),
 });
 
+// Room reviews table
+export const roomReviews = pgTable("room_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  rating: integer("rating").notNull(), // 1-5
+  comment: text("comment"),
+  context: text("context"), // e.g., "study", "tambay", etc.
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   reservations: many(reservations),
@@ -55,6 +66,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 
 export const roomsRelations = relations(rooms, ({ many }) => ({
   reservations: many(reservations),
+  reviews: many(roomReviews),
 }));
 
 export const reservationsRelations = relations(reservations, ({ one }) => ({
@@ -66,6 +78,11 @@ export const reservationsRelations = relations(reservations, ({ one }) => ({
     fields: [reservations.roomId],
     references: [rooms.id],
   }),
+}));
+
+export const roomReviewsRelations = relations(roomReviews, ({ one }) => ({
+  user: one(users, { fields: [roomReviews.userId], references: [users.id] }),
+  room: one(rooms, { fields: [roomReviews.roomId], references: [rooms.id] }),
 }));
 
 // Zod schemas for validation
@@ -91,10 +108,20 @@ export const insertReservationSchema = createInsertSchema(reservations).omit({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format"),
 });
 
+export const insertRoomReviewSchema = createInsertSchema(roomReviews).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  rating: z.number().int().min(1).max(5),
+  context: z.string().optional(),
+  comment: z.string().max(2000).optional(),
+});
+
 // Select schemas
 export const selectUserSchema = createSelectSchema(users);
 export const selectRoomSchema = createSelectSchema(rooms);
 export const selectReservationSchema = createSelectSchema(reservations);
+export const selectRoomReviewSchema = createSelectSchema(roomReviews);
 
 // TypeScript types
 export type User = typeof users.$inferSelect;
@@ -105,6 +132,9 @@ export type InsertRoom = z.infer<typeof insertRoomSchema>;
 
 export type Reservation = typeof reservations.$inferSelect;
 export type InsertReservation = z.infer<typeof insertReservationSchema>;
+
+export type RoomReview = typeof roomReviews.$inferSelect;
+export type InsertRoomReview = z.infer<typeof insertRoomReviewSchema>;
 
 // Extended types for API responses with relations
 export type ReservationWithDetails = Reservation & {

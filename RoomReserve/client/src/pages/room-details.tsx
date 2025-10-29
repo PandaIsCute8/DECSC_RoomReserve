@@ -32,6 +32,7 @@ export default function RoomDetails() {
     enabled: !!roomId,
   });
 
+
   // Fetch room reservations for the selected date
   const { data: roomReservations, error: reservationsError } = useQuery<Reservation[]>({
     queryKey: ["/api/rooms", roomId, "reservations", format(selectedDate, "yyyy-MM-dd")],
@@ -274,6 +275,7 @@ export default function RoomDetails() {
               </p>
             </div>
           </Card>
+
         </div>
       </div>
     </div>
