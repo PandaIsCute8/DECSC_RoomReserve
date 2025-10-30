@@ -78,7 +78,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
       const rooms = await storage.getRoomsWithStatus(currentDate, currentTime);
-      res.json(rooms);
+      // Deduplicate by building+floor+name to avoid showing duplicates if DB has dupes
+      const dedupedMap = new Map<string, typeof rooms[number]>();
+      for (const r of rooms) {
+        const key = `${r.building}-${r.floor}-${r.name}`;
+        if (!dedupedMap.has(key)) dedupedMap.set(key, r);
+      }
+      res.json(Array.from(dedupedMap.values()));
     } catch (error) {
       console.error("Get rooms error:", error);
       res.status(500).json({ message: "Failed to fetch rooms" });

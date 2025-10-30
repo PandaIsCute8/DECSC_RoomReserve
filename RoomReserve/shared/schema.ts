@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, boolean, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, boolean, pgEnum, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -22,16 +22,26 @@ export const users = pgTable("users", {
 });
 
 // Rooms table
-export const rooms = pgTable("rooms", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
-  building: text("building").notNull().default("JGSOM"),
-  floor: integer("floor").notNull(),
-  capacity: integer("capacity").notNull(),
-  amenities: text("amenities").array().notNull().default(sql`ARRAY[]::text[]`),
-  imageUrl: text("image_url"),
-  isActive: boolean("is_active").notNull().default(true),
-});
+export const rooms = pgTable(
+  "rooms",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: text("name").notNull(),
+    building: text("building").notNull().default("JGSOM"),
+    floor: integer("floor").notNull(),
+    capacity: integer("capacity").notNull(),
+    amenities: text("amenities").array().notNull().default(sql`ARRAY[]::text[]`),
+    imageUrl: text("image_url"),
+    isActive: boolean("is_active").notNull().default(true),
+  },
+  (t) => ({
+    roomsUniqueByLocationAndName: unique("rooms_unique_building_floor_name").on(
+      t.building,
+      t.floor,
+      t.name,
+    ),
+  })
+);
 
 // Reservations table
 export const reservations = pgTable("reservations", {

@@ -194,6 +194,39 @@ rm -rf node_modules package-lock.json
 npm install
 ```
 
+## Email Delivery (SMTP)
+
+RoomReserve can send real emails for reservation confirmations and reminders. If SMTP is not configured, the server will log the emails instead of sending them.
+
+### Configure SMTP
+
+Add the following to your `.env` file (values from your SMTP provider such as Gmail, SendGrid, Mailgun, SMTP2GO, etc.):
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your_smtp_username
+SMTP_PASS=your_smtp_password
+# Optional: From header
+SMTP_FROM=RoomReserve <no-reply@yourdomain.com>
+```
+
+Then install dependencies if not already done:
+
+```bash
+npm install
+```
+
+Start the server as usual:
+
+```bash
+npm run dev
+```
+
+Notes:
+- Port 465 implies a secure connection (TLS). For 587, the transport will use STARTTLS.
+- Emails are sent from the backend in `server/mailer.ts`. Confirmation is sent immediately after reservation creation, and a reminder is scheduled for 5 minutes before the start time.
+
 ## Contributing
 
 1. Fork the repository

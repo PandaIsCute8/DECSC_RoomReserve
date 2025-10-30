@@ -110,7 +110,7 @@ async function seed() {
       await db
         .insert(rooms)
         .values(room)
-        .onConflictDoNothing();
+        .onConflictDoNothing({ target: [rooms.building, rooms.floor, rooms.name] });
     }
 
     console.log(`✅ Created ${sampleRooms.length} sample rooms`);

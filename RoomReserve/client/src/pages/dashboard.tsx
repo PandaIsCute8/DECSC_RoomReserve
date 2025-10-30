@@ -36,11 +36,21 @@ export default function Dashboard() {
     queryKey: ["/api/hotspots"],
   });
 
+  // Deduplicate rooms on the client by building+floor+name (defensive against any backend/DB duplicates)
+  const uniqueRooms: RoomWithCurrentStatus[] = useMemo(() => {
+    const map = new Map<string, RoomWithCurrentStatus>();
+    for (const r of rooms || []) {
+      const key = `${r.building}-${r.floor}-${r.name}`;
+      if (!map.has(key)) map.set(key, r);
+    }
+    return Array.from(map.values());
+  }, [rooms]);
+
   // selected amenities array for matching/scoring
   const selectedAmenities = useMemo(() => Object.keys(amenityPrefs).filter(k => amenityPrefs[k]), [amenityPrefs]);
 
   // Filter rooms
-  const filteredRooms = rooms?.filter((room) => {
+  const filteredRooms = uniqueRooms.filter((room) => {
     const matchesSearch = 
       room.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       room.building.toLowerCase().includes(searchQuery.toLowerCase());
@@ -56,7 +66,7 @@ export default function Dashboard() {
     const matchesAmenities = selectedAmenities.length === 0 || selectedAmenities.every(a => (room.amenities || []).includes(a));
 
     return matchesSearch && matchesFloor && matchesCapacity && matchesAmenities;
-  }) || [];
+  });
 
   const sortedRooms = useMemo(() => {
     return [...filteredRooms].sort((a, b) => {
@@ -72,8 +82,8 @@ export default function Dashboard() {
   }, [filteredRooms, selectedAmenities]);
 
   // Calculate stats
-  const totalRooms = rooms?.length || 0;
-  const availableRooms = rooms?.filter(r => !r.currentReservation).length || 0;
+  const totalRooms = uniqueRooms.length || 0;
+  const availableRooms = uniqueRooms.filter(r => !r.currentReservation).length || 0;
   const occupiedRooms = totalRooms - availableRooms;
 
   return (
