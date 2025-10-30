@@ -311,11 +311,17 @@ export class DatabaseStorage implements IStorage {
     const allRooms = await this.getAllRooms();
     const roomsWith = await this.getRoomsWithStatus(date, time);
     const map = new Map<string, { building: string; floor: number; occupied: number; total: number }>();
+    // Only count each unique room (building, floor, name) once in total
+    const uniqueRoomKeys = new Set<string>();
     for (const room of allRooms) {
-      const key = `${room.building}-${room.floor}`;
-      if (!map.has(key)) map.set(key, { building: room.building, floor: room.floor, occupied: 0, total: 0 });
-      const bucket = map.get(key)!;
-      bucket.total += 1;
+      const roomKey = `${room.building}-${room.floor}-${room.name}`;
+      if (!uniqueRoomKeys.has(roomKey)) {
+        uniqueRoomKeys.add(roomKey);
+        const key = `${room.building}-${room.floor}`;
+        if (!map.has(key)) map.set(key, { building: room.building, floor: room.floor, occupied: 0, total: 0 });
+        const bucket = map.get(key)!;
+        bucket.total += 1;
+      }
     }
     for (const r of roomsWith) {
       const key = `${r.building}-${r.floor}`;

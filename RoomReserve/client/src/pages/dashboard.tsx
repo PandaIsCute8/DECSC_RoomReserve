@@ -14,6 +14,7 @@ import {
 import { RoomCard } from "@/components/room-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { RoomWithCurrentStatus } from "@shared/schema";
+import { Progress } from "@/components/ui/progress";
 
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -234,11 +235,24 @@ export default function Dashboard() {
           <h3 className="font-semibold mb-3">Crowd Hotspots</h3>
           <div className="space-y-2">
             {hotspots?.slice(0, 6).map((h: any, i: number) => {
-              const pct = h.total ? Math.round((h.occupied / h.total) * 100) : 0;
+              // Hotspot crowd fraction
+              const value = h.total ? (h.occupied / h.total) * 100 : 0;
               return (
-                <div key={i} className="flex items-center justify-between text-sm">
-                  <span>{h.building} / Floor {h.floor}</span>
-                  <span className={pct > 60 ? "text-destructive" : "text-muted-foreground"}>{pct}% busy</span>
+                <div key={i} className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span>{h.building} / Floor {h.floor}</span>
+                    {/* Optionally you can tint bar if high occupancy, but we'll just show bar */}
+                  </div>
+                  {/* Progress bar with fraction text overlay */}
+                  <div className="relative w-full flex items-center">
+                    <Progress value={value} className="w-full h-5 bg-muted-foreground/10" />
+                    {/* Absolute overlay the fraction text (centered) */}
+                    <div className="absolute w-full left-0 top-0 h-full flex items-center justify-center pointer-events-none select-none text-xs font-medium"
+                      style={{ color: value > 70 ? '#fff' : '#333', textShadow: value > 70 ? '0 0 4px rgba(0,0,0,0.5)' : 'none' }}
+                    >
+                      {h.occupied}/{h.total} full
+                    </div>
+                  </div>
                 </div>
               );
             })}
