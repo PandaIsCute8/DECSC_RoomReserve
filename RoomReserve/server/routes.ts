@@ -355,13 +355,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: session.userId, // Add userId for validation
       });
 
-      // Daily reservation limit (1 per day)
-      const activeReservationsToday = await storage.getActiveReservationCountForDate(
-        session.userId,
-        reservationData.date
-      );
-      if (activeReservationsToday >= 1) {
-        return res.status(400).json({ message: "Maximum reservations reached for the day" });
+      // Daily reservation limit (1 per day) - can be lifted by admin until end of day
+      const liftedUntilIso = (app as any).get?.("dailyLimitLiftExpiresAt") as string | undefined;
+      const isLifted = liftedUntilIso ? new Date(liftedUntilIso) > new Date() : false;
+      if (!isLifted) {
+        const activeReservationsToday = await storage.getActiveReservationCountForDate(
+          session.userId,
+          reservationData.date
+        );
+        if (activeReservationsToday >= 1) {
+          return res.status(400).json({ message: "Maximum reservations reached for the day" });
+        }
       }
 
       // Validate 30-minute advance booking
@@ -551,6 +555,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get all reservations error:", error);
       res.status(500).json({ message: "Failed to fetch reservations" });
+    }
+  });
+
+  // Admin: lift daily reservation limit until end of day
+  app.post("/api/admin/reset-daily-limit", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) return res.status(401).json({ message: "Not authenticated" });
+
+      const user = await storage.getUserByEmail(session.email);
+      if (!user?.isAdmin) return res.status(403).json({ message: "Admin access required" });
+
+      const now = new Date();
+      const endOfDay = new Date(now);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Store ISO timestamp in app locals so it's available across routes
+      (app as any).set("dailyLimitLiftExpiresAt", endOfDay.toISOString());
+
+      res.json({ message: "Daily reservation limit lifted until end of day", expiresAt: endOfDay.toISOString() });
+    } catch (error) {
+      console.error("Reset daily limit error:", error);
+      res.status(500).json({ message: "Failed to lift daily limit" });
+    }
+  });
+
+  // Admin: check daily limit status
+  app.get("/api/admin/daily-limit-status", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) return res.status(401).json({ message: "Not authenticated" });
+
+      const user = await storage.getUserByEmail(session.email);
+      if (!user?.isAdmin) return res.status(403).json({ message: "Admin access required" });
+
+      const liftedUntilIso = (app as any).get?.("dailyLimitLiftExpiresAt") as string | undefined;
+      const isLifted = liftedUntilIso ? new Date(liftedUntilIso) > new Date() : false;
+      res.json({ isLifted, expiresAt: liftedUntilIso || null });
+    } catch (error) {
+      console.error("Daily limit status error:", error);
+      res.status(500).json({ message: "Failed to fetch daily limit status" });
     }
   });
 

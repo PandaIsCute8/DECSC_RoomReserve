@@ -1,4 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import React from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { BarChart3, Users, Calendar, TrendingUp } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import {
@@ -13,6 +15,37 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import type { ReservationWithDetails } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+
+function LiftDailyLimitButton() {
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = React.useState(false);
+
+  const handleClick = async () => {
+    setIsLoading(true);
+    try {
+      await apiRequest("POST", "/api/admin/reset-daily-limit", {});
+      toast({ title: "Daily limit lifted", description: "Users can make additional bookings for today." });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reservations"] });
+    } catch (err: any) {
+      toast({ title: "Failed", description: err?.message || "Could not lift daily limit", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <button
+      className="px-3 py-2 rounded-md bg-primary text-white text-sm"
+      onClick={handleClick}
+      disabled={isLoading}
+      data-testid="button-lift-daily-limit"
+    >
+      {isLoading ? "Lifting..." : "Lift daily limit (today)"}
+    </button>
+  );
+}
 
 export default function Admin() {
   // Fetch all reservations
@@ -54,13 +87,18 @@ export default function Admin() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-semibold leading-tight" data-testid="text-page-title">
-          Admin Panel
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Monitor room reservations and utilization statistics
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold leading-tight" data-testid="text-page-title">
+            Admin Panel
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Monitor room reservations and utilization statistics
+          </p>
+        </div>
+        <div className="ml-4">
+          <LiftDailyLimitButton />
+        </div>
       </div>
 
       {/* Statistics Cards */}
