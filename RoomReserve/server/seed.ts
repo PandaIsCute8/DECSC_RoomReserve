@@ -1,22 +1,29 @@
 import { db } from "./db";
 import { rooms, users } from "@shared/schema";
+import { hashPassword } from "./passwords";
 
 async function seed() {
   console.log("🌱 Seeding database...");
 
   try {
     // Create an admin user
+    const adminPasswordHash = await hashPassword("AdminPass123");
     const [adminUser] = await db
       .insert(users)
       .values({
         email: "admin@student.ateneo.edu",
+        studentId: "200000",
+        firstName: "Admin",
+        lastName: "User",
         name: "Admin User",
+        passwordHash: adminPasswordHash,
         isAdmin: true,
       })
       .onConflictDoNothing()
       .returning();
 
     console.log("✅ Admin user created:", adminUser?.email);
+    console.log("   Student ID: 200000, Password: AdminPass123");
 
     // Create sample JGSOM rooms
     const sampleRooms = [

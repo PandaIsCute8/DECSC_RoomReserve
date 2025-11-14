@@ -34,6 +34,12 @@ export function AppSidebar({ user }: AppSidebarProps) {
       icon: Calendar,
       testId: "link-my-bookings",
     },
+    {
+      title: "Account",
+      url: "/account",
+      icon: Settings,
+      testId: "link-account",
+    },
   ];
 
   const adminItems = user?.isAdmin

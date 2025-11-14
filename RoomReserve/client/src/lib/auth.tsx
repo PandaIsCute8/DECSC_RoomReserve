@@ -7,7 +7,8 @@ interface AuthContextType {
   user: User | null;
   sessionId: string | null;
   isLoading: boolean;
-  login: (email: string, name: string) => Promise<void>;
+  login: (studentId: string, password: string) => Promise<void>;
+  signup: (data: { studentId: string; firstName: string; lastName: string; email: string; password: string }) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -27,8 +28,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Login mutation
   const loginMutation = useMutation({
-    mutationFn: async ({ email, name }: { email: string; name: string }) => {
-      const response = await apiRequest("POST", "/api/auth/login", { email, name });
+    mutationFn: async ({ studentId, password }: { studentId: string; password: string }) => {
+      const response = await apiRequest("POST", "/api/auth/login", { studentId, password });
+      return response;
+    },
+    onSuccess: (data: any) => {
+      setSessionId(data.sessionId);
+      localStorage.setItem("sessionId", data.sessionId);
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+    },
+  });
+
+  // Signup mutation
+  const signupMutation = useMutation({
+    mutationFn: async (data: { studentId: string; firstName: string; lastName: string; email: string; password: string }) => {
+      const response = await apiRequest("POST", "/api/auth/signup", data);
       return response;
     },
     onSuccess: (data: any) => {
@@ -50,8 +64,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
   });
 
-  const login = async (email: string, name: string) => {
-    await loginMutation.mutateAsync({ email, name });
+  const login = async (studentId: string, password: string) => {
+    await loginMutation.mutateAsync({ studentId, password });
+  };
+
+  const signup = async (data: { studentId: string; firstName: string; lastName: string; email: string; password: string }) => {
+    await signupMutation.mutateAsync(data);
   };
 
   const logout = async () => {
@@ -65,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionId,
         isLoading,
         login,
+        signup,
         logout,
       }}
     >

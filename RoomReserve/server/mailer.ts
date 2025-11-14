@@ -109,6 +109,23 @@ export function cancelReminder(reservationId: string) {
   }
 }
 
+export async function sendPasswordResetEmail(to: string, resetLink: string, firstName: string) {
+  const subject = "Reset your RoomReserve password";
+  const body = [
+    `Hi ${firstName},`,
+    "",
+    "You requested to reset your password for your RoomReserve account.",
+    "",
+    "Click the link below to reset your password:",
+    resetLink,
+    "",
+    "This link will expire in 1 hour.",
+    "",
+    "If you didn't request this, please ignore this email.",
+  ].join("\n");
+  await sendEmail(to, subject, body);
+}
+
 export type { ReservationDetails };
 
 

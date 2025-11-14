@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
-import { Mail, CheckCircle2, Clock, Users } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { Mail, CheckCircle2, Clock, Users, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,8 +13,8 @@ export default function Landing() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { login, user } = useAuth();
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   // Redirect if already logged in
@@ -27,11 +27,19 @@ export default function Landing() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate Ateneo student email
-    if (!email.endsWith("@student.ateneo.edu")) {
+    if (!studentId.match(/^2\d{5}$/)) {
       toast({
-        title: "Invalid Email",
-        description: "Please use your Ateneo student email address (@student.ateneo.edu)",
+        title: "Invalid Student ID",
+        description: "Student ID must be in format 2xxxxx (2 followed by 5 digits)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (password.length < 8) {
+      toast({
+        title: "Invalid Password",
+        description: "Password must be at least 8 characters",
         variant: "destructive",
       });
       return;
@@ -40,7 +48,7 @@ export default function Landing() {
     setIsLoading(true);
     
     try {
-      await login(email, name);
+      await login(studentId, password);
       toast({
         title: "Welcome!",
         description: "You've successfully signed in to RoomReserve.",
@@ -49,7 +57,7 @@ export default function Landing() {
     } catch (error: any) {
       toast({
         title: "Login Failed",
-        description: error.message || "Please try again.",
+        description: error.message || "Please check your credentials and try again.",
         variant: "destructive",
       });
     } finally {
@@ -118,38 +126,48 @@ export default function Landing() {
                     <p className="text-sm text-muted-foreground">Never miss your booking</p>
                   </div>
                 </div>
+
+                <div className="flex gap-3">
+                  <div className="h-10 w-10 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Shield className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm">Secure Accounts</h3>
+                    <p className="text-sm text-muted-foreground">Passwords & reset links protect access</p>
+                  </div>
+                </div>
               </div>
 
               {/* Login Form */}
               <Card className="p-6">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="name">Name</Label>
+                    <Label htmlFor="studentId">Student ID</Label>
                     <Input
-                      id="name"
+                      id="studentId"
                       type="text"
-                      placeholder="Juan Dela Cruz"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      placeholder="2xxxxx"
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
                       required
-                      data-testid="input-name"
+                      pattern="^2\d{5}$"
+                      title="Student ID must start with 2 followed by 5 digits"
+                      data-testid="input-student-id"
                     />
                   </div>
                   
                   <div className="space-y-2">
-                    <Label htmlFor="email">Ateneo Student Email</Label>
+                    <Label htmlFor="password">Account Password</Label>
                     <Input
-                      id="email"
-                      type="email"
-                      placeholder="yourname@student.ateneo.edu"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      id="password"
+                      type="password"
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                       required
-                      data-testid="input-email"
+                      minLength={8}
+                      data-testid="input-password"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Only @student.ateneo.edu email addresses are accepted
-                    </p>
                   </div>
 
                   <Button
@@ -159,13 +177,25 @@ export default function Landing() {
                     disabled={isLoading}
                     data-testid="button-signin"
                   >
-                    {isLoading ? "Signing in..." : "Sign In with Email"}
+                    {isLoading ? "Signing in..." : "Sign In"}
                   </Button>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <Link href="/forgot-password" className="text-primary hover:underline">
+                      Forgot password?
+                    </Link>
+                    <span className="text-muted-foreground">
+                      No account?{" "}
+                      <Link href="/signup" className="text-primary hover:underline">
+                        Sign up
+                      </Link>
+                    </span>
+                  </div>
                 </form>
               </Card>
 
               <p className="text-xs text-muted-foreground text-center">
-                By signing in, you agree to use RoomReserve responsibly and confirm your bookings on time.
+                Your password protects your reservations. Keep it safe and never share it with others.
               </p>
             </div>
 

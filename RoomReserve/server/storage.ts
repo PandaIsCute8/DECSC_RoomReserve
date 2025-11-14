@@ -22,7 +22,11 @@ export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByStudentId(studentId: string): Promise<User | undefined>;
+  getUserByResetToken(tokenHash: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserPassword(userId: string, passwordHash: string): Promise<void>;
+  savePasswordResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
 
   // Room methods
   getRoom(id: string): Promise<Room | undefined>;
@@ -64,12 +68,51 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
+  async getUserByStudentId(studentId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.studentId, studentId));
+    return user || undefined;
+  }
+
+  async getUserByResetToken(tokenHash: string): Promise<User | undefined> {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.resetToken, tokenHash),
+          sql`${users.resetTokenExpiresAt} > NOW()`
+        )
+      );
+    return user || undefined;
+  }
+
   async createUser(insertUser: InsertUser): Promise<User> {
     const [user] = await db
       .insert(users)
       .values(insertUser)
       .returning();
     return user;
+  }
+
+  async updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ 
+        passwordHash,
+        resetToken: null,
+        resetTokenExpiresAt: null,
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async savePasswordResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        resetToken: tokenHash,
+        resetTokenExpiresAt: expiresAt,
+      })
+      .where(eq(users.id, userId));
   }
 
   // Room methods
@@ -268,8 +311,10 @@ export class DatabaseStorage implements IStorage {
         )
       );
 
-    const value = (result[0] as { value: bigint } | undefined)?.value ?? 0n;
-    return Number(value);
+    const value = result[0]?.value;
+    if (value === undefined || value === null) return 0;
+    // Handle both bigint and number types from database
+    return typeof value === 'bigint' ? Number(value) : Number(value);
   }
 
   async checkForConflicts(

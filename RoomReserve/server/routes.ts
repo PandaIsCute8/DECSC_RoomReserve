@@ -5,12 +5,26 @@ import {
   sendReservationConfirmationEmail,
   scheduleFiveMinuteReminder,
   cancelReminder,
+  sendPasswordResetEmail,
 } from "./mailer";
-import { insertUserSchema, insertReservationSchema, insertRoomReviewSchema } from "@shared/schema";
+import { insertReservationSchema, insertRoomReviewSchema, type User } from "@shared/schema";
 import { z } from "zod";
+import crypto from "crypto";
+import { hashPassword, verifyPassword } from "./passwords";
 
 // Simple session storage - in production, use proper session management
 const sessions = new Map<string, { userId: string; email: string }>();
+
+function sanitizeUser(user: User) {
+  const { passwordHash, resetToken, resetTokenExpiresAt, ...safeUser } = user;
+  return safeUser;
+}
+
+function createSessionForUser(user: User) {
+  const sessionId = Math.random().toString(36).substring(2);
+  sessions.set(sessionId, { userId: user.id, email: user.email });
+  return sessionId;
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to get current user
@@ -19,31 +33,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return sessionId ? sessions.get(sessionId) : null;
   };
 
-  // Auth endpoints
-  app.post("/api/auth/login", async (req, res) => {
-    try {
-      const { email, name } = insertUserSchema.parse(req.body);
+  const signupSchema = z.object({
+    studentId: z.string().regex(/^2\d{5}$/, "Student ID must be in format 2xxxxx (2 followed by 5 digits)"),
+    firstName: z.string().min(1, "First name is required"),
+    lastName: z.string().min(1, "Last name is required"),
+    email: z.string().email(),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+  });
 
-      // Validate Ateneo student email
-      if (!email.endsWith("@student.ateneo.edu")) {
-        return res.status(400).json({ 
-          message: "Only @student.ateneo.edu email addresses are allowed" 
+  const loginSchema = z.object({
+    studentId: z.string().regex(/^2\d{5}$/, "Student ID must be in format 2xxxxx"),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+  });
+
+  const changePasswordSchema = z.object({
+    currentPassword: z.string().min(8),
+    newPassword: z.string().min(8),
+  });
+
+  const forgotPasswordSchema = z.object({
+    email: z.string().email(),
+  });
+
+  const resetPasswordSchema = z.object({
+    token: z.string().min(10),
+    newPassword: z.string().min(8),
+  });
+
+  // Auth endpoints
+  app.post("/api/auth/signup", async (req, res) => {
+    try {
+      const parsed = signupSchema.parse(req.body);
+      if (!parsed.email.endsWith("@student.ateneo.edu")) {
+        return res.status(400).json({
+          message: "Only @student.ateneo.edu email addresses are allowed",
         });
       }
 
-      // Get or create user
-      let user = await storage.getUserByEmail(email);
-      if (!user) {
-        user = await storage.createUser({ email, name, isAdmin: false });
+      const existingEmail = await storage.getUserByEmail(parsed.email.toLowerCase());
+      if (existingEmail) {
+        return res.status(409).json({ message: "Email already registered" });
       }
 
-      // Create session
-      const sessionId = Math.random().toString(36).substring(7);
-      sessions.set(sessionId, { userId: user.id, email: user.email });
+      const existingStudentId = await storage.getUserByStudentId(parsed.studentId);
+      if (existingStudentId) {
+        return res.status(409).json({ message: "Student ID already registered" });
+      }
 
-      res.json({ user, sessionId });
+      const passwordHash = await hashPassword(parsed.password);
+      const user = await storage.createUser({
+        email: parsed.email.toLowerCase(),
+        studentId: parsed.studentId,
+        firstName: parsed.firstName,
+        lastName: parsed.lastName,
+        name: `${parsed.firstName} ${parsed.lastName}`,
+        passwordHash,
+        isAdmin: false,
+      });
+
+      const sessionId = createSessionForUser(user);
+      res.status(201).json({ user: sanitizeUser(user), sessionId });
+    } catch (error) {
+      console.error("Signup error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid signup data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create account" });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { studentId, password } = loginSchema.parse(req.body);
+
+      const user = await storage.getUserByStudentId(studentId);
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isValid = await verifyPassword(password, user.passwordHash);
+      if (!isValid) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const sessionId = createSessionForUser(user);
+      res.json({ user: sanitizeUser(user), sessionId });
     } catch (error) {
       console.error("Login error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid credentials", errors: error.errors });
+      }
       res.status(400).json({ message: "Invalid request" });
     }
   });
@@ -62,12 +141,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(401).json({ message: "Not authenticated" });
     }
 
-    const user = await storage.getUserByEmail(session.email);
+    const user = await storage.getUser(session.userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.json(user);
+    res.json(sanitizeUser(user));
+  });
+
+  app.post("/api/auth/change-password", async (req, res) => {
+    try {
+      const session = getCurrentUser(req);
+      if (!session) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const parsed = changePasswordSchema.parse(req.body);
+      const user = await storage.getUser(session.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const matches = await verifyPassword(parsed.currentPassword, user.passwordHash);
+      if (!matches) {
+        return res.status(400).json({ message: "Current password is incorrect" });
+      }
+
+      const newHash = await hashPassword(parsed.newPassword);
+      await storage.updateUserPassword(user.id, newHash);
+
+      res.json({ message: "Password updated successfully" });
+    } catch (error) {
+      console.error("Change password error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid password data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = forgotPasswordSchema.parse(req.body);
+      const user = await storage.getUserByEmail(email.toLowerCase());
+
+      if (user) {
+        const token = crypto.randomBytes(32).toString("hex");
+        const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        await storage.savePasswordResetToken(user.id, tokenHash, expiresAt);
+
+        const baseUrl = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
+        const resetLink = `${baseUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
+        await sendPasswordResetEmail(user.email, resetLink, user.firstName);
+      }
+
+      res.json({ message: "If an account exists for that email, a reset link has been sent." });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid email address", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to process password reset request" });
+    }
+  });
+
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, newPassword } = resetPasswordSchema.parse(req.body);
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+      const user = await storage.getUserByResetToken(tokenHash);
+
+      if (!user) {
+        return res.status(400).json({ message: "Invalid or expired reset token" });
+      }
+
+      const hash = await hashPassword(newPassword);
+      await storage.updateUserPassword(user.id, hash);
+
+      res.json({ message: "Password reset successfully" });
+    } catch (error) {
+      console.error("Reset password error:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid reset data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to reset password" });
+    }
   });
 
   // Room endpoints

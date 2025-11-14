@@ -16,7 +16,13 @@ export const reservationStatusEnum = pgEnum("reservation_status", [
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
+  studentId: text("student_id").notNull().unique(),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
   name: text("name").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  resetToken: text("reset_token"),
+  resetTokenExpiresAt: timestamp("reset_token_expires_at"),
   isAdmin: boolean("is_admin").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -99,6 +105,8 @@ export const roomReviewsRelations = relations(roomReviews, ({ one }) => ({
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+  resetToken: true,
+  resetTokenExpiresAt: true,
 });
 
 export const insertRoomSchema = createInsertSchema(rooms).omit({

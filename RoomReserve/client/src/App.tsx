@@ -10,9 +10,13 @@ import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
+import Signup from "@/pages/signup";
+import ForgotPassword from "@/pages/forgot-password";
+import ResetPassword from "@/pages/reset-password";
 import Dashboard from "@/pages/dashboard";
 import RoomDetails from "@/pages/room-details";
 import Bookings from "@/pages/bookings";
+import Account from "@/pages/account";
 import Admin from "@/pages/admin";
 import { useEffect } from "react";
 
@@ -25,10 +29,14 @@ function ProtectedRoutes() {
     "--sidebar-width-icon": "3rem",
   };
 
-  // Redirect to landing if not authenticated
+  // Redirect to login if not authenticated (but allow access to auth pages)
   useEffect(() => {
-    if (!isLoading && !user && location !== "/") {
-      setLocation("/");
+    if (!isLoading && !user) {
+      const authPaths = ["/", "/login", "/signup", "/forgot-password", "/reset-password"];
+      const isAuthPath = authPaths.some(path => location === path || location.startsWith(path + "/"));
+      if (!isAuthPath) {
+        setLocation("/login");
+      }
     }
   }, [user, isLoading, location, setLocation]);
 
@@ -49,7 +57,7 @@ function ProtectedRoutes() {
 
   const handleLogout = async () => {
     await logout();
-    setLocation("/");
+    setLocation("/login");
   };
 
   return (
@@ -79,6 +87,7 @@ function ProtectedRoutes() {
                 <Route path="/dashboard" component={Dashboard} />
                 <Route path="/room/:id" component={RoomDetails} />
                 <Route path="/bookings" component={Bookings} />
+                <Route path="/account" component={Account} />
                 <Route path="/admin" component={Admin} />
                 <Route component={NotFound} />
               </Switch>
@@ -97,6 +106,10 @@ function App() {
         <TooltipProvider>
           <Switch>
             <Route path="/" component={Landing} />
+            <Route path="/login" component={Landing} />
+            <Route path="/signup" component={Signup} />
+            <Route path="/forgot-password" component={ForgotPassword} />
+            <Route path="/reset-password" component={ResetPassword} />
             <Route>
               <ProtectedRoutes />
             </Route>
