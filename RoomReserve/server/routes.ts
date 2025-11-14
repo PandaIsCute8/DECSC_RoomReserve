@@ -188,12 +188,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user) {
         const token = crypto.randomBytes(32).toString("hex");
         const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        // Extend expiration to 24 hours for easier testing (can reduce to 1 hour later)
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+        
+        console.log("Forgot password: Saving reset token", {
+          userId: user.id,
+          email: user.email,
+          tokenLength: token.length,
+          tokenHashPrefix: tokenHash.substring(0, 16),
+          expiresAt: expiresAt.toISOString()
+        });
+        
         await storage.savePasswordResetToken(user.id, tokenHash, expiresAt);
 
         const baseUrl = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
         const resetLink = `${baseUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
+        
+        console.log("Forgot password: Sending email", {
+          email: user.email,
+          resetLink: resetLink.substring(0, 100) + "...",
+          tokenInLink: token.substring(0, 16) + "...",
+          tokenHashStored: tokenHash.substring(0, 16) + "..."
+        });
+        
         await sendPasswordResetEmail(user.email, resetLink, user.firstName);
+        
+        // Verify the token was saved correctly
+        const verifyUser = await storage.getUserByResetToken(tokenHash);
+        console.log("Forgot password: Token verification after save", {
+          tokenSaved: !!verifyUser,
+          userId: verifyUser?.id,
+          email: verifyUser?.email
+        });
       }
 
       res.json({ message: "If an account exists for that email, a reset link has been sent." });
@@ -208,24 +234,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
-      const { token, newPassword } = resetPasswordSchema.parse(req.body);
-      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+      console.log("Reset password: Request received", {
+        bodyKeys: Object.keys(req.body || {}),
+        hasToken: !!(req.body?.token),
+        hasNewPassword: !!(req.body?.newPassword),
+        tokenLength: req.body?.token?.length,
+        passwordLength: req.body?.newPassword?.length
+      });
+
+      // Validate with Zod first
+      let parsed;
+      try {
+        parsed = resetPasswordSchema.parse(req.body);
+      } catch (zodError) {
+        if (zodError instanceof z.ZodError) {
+          console.error("Reset password: Zod validation failed", zodError.errors);
+          return res.status(400).json({ 
+            message: "Invalid reset data", 
+            errors: zodError.errors.map(e => ({
+              path: e.path.join("."),
+              message: e.message
+            }))
+          });
+        }
+        throw zodError;
+      }
+
+      const { token, newPassword } = parsed;
+      
+      // Trim and validate token
+      const cleanToken = (token || "").trim();
+      if (!cleanToken || cleanToken.length < 10) {
+        console.error("Reset password: Invalid token format", { 
+          tokenLength: cleanToken.length,
+          tokenProvided: !!token,
+          tokenValue: token?.substring(0, 20) + "..."
+        });
+        return res.status(400).json({ 
+          message: "Invalid reset token format",
+          details: `Token must be at least 10 characters, got ${cleanToken.length}`
+        });
+      }
+
+      // Hash the token the same way it was hashed when saved
+      const tokenHash = crypto.createHash("sha256").update(cleanToken).digest("hex");
+      
+      console.log("Reset password: Looking for token", { 
+        tokenLength: cleanToken.length,
+        tokenHashPrefix: tokenHash.substring(0, 16)
+      });
+
       const user = await storage.getUserByResetToken(tokenHash);
 
       if (!user) {
-        return res.status(400).json({ message: "Invalid or expired reset token" });
+        // Try to find any user with a reset token to help debug
+        console.error("Reset password: Token not found or expired", { 
+          tokenLength: cleanToken.length,
+          tokenHashPrefix: tokenHash.substring(0, 16),
+          message: "No user found with matching token hash or token expired"
+        });
+        return res.status(400).json({ 
+          message: "Invalid or expired reset token. Please request a new password reset link.",
+          details: "The token may have expired (tokens are valid for 1 hour) or may have already been used."
+        });
       }
+
+      console.log("Reset password: User found", { userId: user.id, email: user.email });
 
       const hash = await hashPassword(newPassword);
       await storage.updateUserPassword(user.id, hash);
 
+      console.log("Reset password: Password updated successfully", { userId: user.id });
       res.json({ message: "Password reset successfully" });
     } catch (error) {
       console.error("Reset password error:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid reset data", errors: error.errors });
+        return res.status(400).json({ 
+          message: "Invalid reset data", 
+          errors: error.errors.map(e => ({
+            path: e.path.join("."),
+            message: e.message
+          }))
+        });
       }
-      res.status(500).json({ message: "Failed to reset password" });
+      res.status(500).json({ message: "Failed to reset password", error: error instanceof Error ? error.message : "Unknown error" });
     }
   });
 

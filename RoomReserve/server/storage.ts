@@ -74,16 +74,108 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByResetToken(tokenHash: string): Promise<User | undefined> {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(
-        and(
-          eq(users.resetToken, tokenHash),
-          sql`${users.resetTokenExpiresAt} > NOW()`
-        )
-      );
-    return user || undefined;
+    try {
+      // First, try to find user with matching token (without expiration check to see if it exists)
+      const [userWithToken] = await db
+        .select()
+        .from(users)
+        .where(
+          and(
+            sql`${users.resetToken} IS NOT NULL`,
+            eq(users.resetToken, tokenHash)
+          )
+        );
+      
+      if (userWithToken) {
+        // Check expiration manually to get better error info
+        const now = new Date();
+        const expiresAt = userWithToken.resetTokenExpiresAt;
+        const expiresAtDate = expiresAt ? new Date(expiresAt) : null;
+        const isExpired = expiresAtDate ? expiresAtDate <= now : true;
+        const timeDiffMinutes = expiresAtDate ? (expiresAtDate.getTime() - now.getTime()) / 1000 / 60 : null;
+        
+        console.log("getUserByResetToken: Found user with token", {
+          userId: userWithToken.id,
+          email: userWithToken.email,
+          expiresAt: expiresAt?.toISOString(),
+          expiresAtDate: expiresAtDate?.toISOString(),
+          now: now.toISOString(),
+          isExpired,
+          timeDiffMinutes: timeDiffMinutes?.toFixed(2),
+          tokenHashPrefix: tokenHash.substring(0, 16),
+          storedTokenPrefix: userWithToken.resetToken?.substring(0, 16),
+          tokensMatch: userWithToken.resetToken === tokenHash
+        });
+        
+        if (!isExpired && expiresAt) {
+          return userWithToken;
+        } else if (isExpired) {
+          console.log("getUserByResetToken: Token expired", {
+            expiresAt: expiresAtDate?.toISOString(),
+            now: now.toISOString(),
+            minutesExpired: timeDiffMinutes ? Math.abs(timeDiffMinutes) : null
+          });
+        }
+      }
+      
+      // If we get here, either no user found or token expired
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(
+          and(
+            sql`${users.resetToken} IS NOT NULL`,
+            eq(users.resetToken, tokenHash),
+            sql`${users.resetTokenExpiresAt} IS NOT NULL`,
+            sql`${users.resetTokenExpiresAt} > NOW()`
+          )
+        );
+      
+      if (!user) {
+        // Debug: Check if there are any users with reset tokens
+        const usersWithTokens = await db
+          .select({ id: users.id, email: users.email, resetToken: users.resetToken, resetTokenExpiresAt: users.resetTokenExpiresAt })
+          .from(users)
+          .where(sql`${users.resetToken} IS NOT NULL`)
+          .limit(5);
+        
+        // Also check if token exists but expired
+        const expiredTokens = await db
+          .select({ id: users.id, email: users.email, resetToken: users.resetToken, resetTokenExpiresAt: users.resetTokenExpiresAt })
+          .from(users)
+          .where(
+            and(
+              sql`${users.resetToken} IS NOT NULL`,
+              eq(users.resetToken, tokenHash),
+              sql`${users.resetTokenExpiresAt} IS NOT NULL`,
+              sql`${users.resetTokenExpiresAt} <= NOW()`
+            )
+          )
+          .limit(1);
+        
+        console.log("getUserByResetToken: No matching user found", {
+          tokenHashPrefix: tokenHash.substring(0, 16),
+          usersWithTokensCount: usersWithTokens.length,
+          expiredTokensCount: expiredTokens.length,
+          sampleTokens: usersWithTokens.map(u => ({
+            email: u.email,
+            tokenPrefix: u.resetToken?.substring(0, 16),
+            expiresAt: u.resetTokenExpiresAt,
+            isExpired: u.resetTokenExpiresAt ? new Date(u.resetTokenExpiresAt) <= new Date() : null
+          })),
+          expiredTokenInfo: expiredTokens.length > 0 ? {
+            email: expiredTokens[0].email,
+            expiresAt: expiredTokens[0].resetTokenExpiresAt,
+            now: new Date().toISOString()
+          } : null
+        });
+      }
+      
+      return user || undefined;
+    } catch (error) {
+      console.error("getUserByResetToken error:", error);
+      throw error;
+    }
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
@@ -106,13 +198,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async savePasswordResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
-    await db
+    const result = await db
       .update(users)
       .set({
         resetToken: tokenHash,
         resetTokenExpiresAt: expiresAt,
       })
-      .where(eq(users.id, userId));
+      .where(eq(users.id, userId))
+      .returning({ resetToken: users.resetToken, resetTokenExpiresAt: users.resetTokenExpiresAt });
+    
+    console.log("savePasswordResetToken: Token saved", {
+      userId,
+      tokenHashPrefix: tokenHash.substring(0, 16),
+      savedTokenPrefix: result[0]?.resetToken?.substring(0, 16),
+      savedExpiresAt: result[0]?.resetTokenExpiresAt?.toISOString(),
+      matches: result[0]?.resetToken === tokenHash
+    });
   }
 
   // Room methods

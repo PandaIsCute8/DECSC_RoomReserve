@@ -19,7 +19,23 @@ export default function ResetPassword() {
     const params = new URLSearchParams(window.location.search);
     const tokenParam = params.get("token");
     if (tokenParam) {
-      setToken(tokenParam);
+      // URLSearchParams.get() already decodes, but handle edge cases
+      let decodedToken = tokenParam;
+      try {
+        // Only decode if it looks encoded (contains %)
+        if (tokenParam.includes("%")) {
+          decodedToken = decodeURIComponent(tokenParam);
+        }
+      } catch (e) {
+        // If decoding fails, use original
+        decodedToken = tokenParam;
+      }
+      const cleanToken = decodedToken.trim();
+      console.log("Reset password: Token extracted from URL", {
+        tokenLength: cleanToken.length,
+        tokenPrefix: cleanToken.substring(0, 8) + "..."
+      });
+      setToken(cleanToken);
     } else {
       toast({
         title: "Invalid link",
@@ -50,16 +66,44 @@ export default function ResetPassword() {
 
     setIsSubmitting(true);
     try {
-      await apiRequest("POST", "/api/auth/reset-password", { token, newPassword: password });
+      // Ensure token is trimmed before sending
+      const cleanToken = token.trim();
+      console.log("Reset password: Submitting", {
+        tokenLength: cleanToken.length,
+        tokenPrefix: cleanToken.substring(0, 8) + "..."
+      });
+      await apiRequest("POST", "/api/auth/reset-password", { token: cleanToken, newPassword: password });
       toast({
         title: "Password reset successfully",
         description: "You can now sign in with your new password.",
       });
       setLocation("/login");
     } catch (error: any) {
+      console.error("Reset password: Error caught", error);
+      let errorMessage = "The reset link may be invalid or expired.";
+      
+      // Try to extract more detailed error message
+      if (error.message) {
+        try {
+          // If error message contains JSON, try to parse it
+          const match = error.message.match(/\{.*\}/);
+          if (match) {
+            const errorData = JSON.parse(match[0]);
+            errorMessage = errorData.message || errorData.details || errorMessage;
+            if (errorData.errors && Array.isArray(errorData.errors)) {
+              errorMessage += " " + errorData.errors.map((e: any) => e.message).join(", ");
+            }
+          } else {
+            errorMessage = error.message;
+          }
+        } catch (e) {
+          errorMessage = error.message;
+        }
+      }
+      
       toast({
         title: "Reset failed",
-        description: error.message || "The reset link may be invalid or expired.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
