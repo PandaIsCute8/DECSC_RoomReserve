@@ -40,6 +40,7 @@ export interface IStorage {
   updateReservationStatus(id: string, status: string, checkedInAt?: Date): Promise<Reservation | undefined>;
   deleteReservation(id: string): Promise<boolean>;
   checkForConflicts(roomId: string, date: string, startTime: string, endTime: string): Promise<boolean>;
+  getActiveReservationCountForDate(userId: string, date: string): Promise<number>;
 
   // Reviews
   createRoomReview(review: InsertRoomReview): Promise<RoomReview>;
@@ -253,6 +254,22 @@ export class DatabaseStorage implements IStorage {
       .returning();
     
     return result.length > 0;
+  }
+
+  async getActiveReservationCountForDate(userId: string, date: string): Promise<number> {
+    const result = await db
+      .select({ value: count().as("value") })
+      .from(reservations)
+      .where(
+        and(
+          eq(reservations.userId, userId),
+          eq(reservations.date, date),
+          sql`${reservations.status} IN ('confirmed', 'checked_in')`
+        )
+      );
+
+    const value = (result[0] as { value: bigint } | undefined)?.value ?? 0n;
+    return Number(value);
   }
 
   async checkForConflicts(

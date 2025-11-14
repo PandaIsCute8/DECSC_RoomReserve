@@ -196,6 +196,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: session.userId, // Add userId for validation
       });
 
+      // Daily reservation limit (1 per day)
+      const activeReservationsToday = await storage.getActiveReservationCountForDate(
+        session.userId,
+        reservationData.date
+      );
+      if (activeReservationsToday >= 1) {
+        return res.status(400).json({ message: "Maximum reservations reached for the day" });
+      }
+
       // Validate 30-minute advance booking
       const now = new Date();
       const reservationDateTime = new Date(`${reservationData.date}T${reservationData.startTime}:00`);
